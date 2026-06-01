@@ -1,0 +1,22 @@
+{
+  "model_name": "distilbert/distilbert-base-uncased",
+  "output_dir": "distilbert-classifier",
+  "tokenized_cache_dir": ".cache/test/tokenized",
+  "max_length": 512,
+  "num_train_epochs": 2,
+  "learning_rate": 2e-5,
+  "per_device_train_batch_size": 8,
+  "per_device_eval_batch_size": 4,
+  "gradient_accumulation_steps": 4,
+  "evals_per_epoch": 2,
+  "saves_per_epoch": 2,
+  "logging_steps": 100,
+  "weight_decay": 0.01,
+  "fp16": true,
+  "dataloader_num_workers": 4,
+  "seed": 42,
+  "threshold": 0.5,
+  "num_labels": 2,
+  "label_column": "labels",
+  "metric_prefix": "binary"
+}

@@ -210,6 +210,7 @@ __marimo__/
 *.codex
 *.parquet
 hf_token
+.config.json
 *_cache/*
 results/*
 *dataset/*
