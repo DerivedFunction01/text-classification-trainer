@@ -121,6 +121,7 @@ def main() -> None:
     dataset_cfg = config["dataset"]
     tokenization_cfg = config["tokenization"]
     training_cfg = config["training"]
+    task_type = config["task_type"]
 
     random.seed(training_cfg["seed"])
     np.random.seed(training_cfg["seed"])
@@ -175,6 +176,8 @@ def main() -> None:
             probabilities = exp_logits[:, 1] / np.sum(exp_logits, axis=-1)
 
         predictions = (probabilities >= training_cfg["threshold"]).astype(int)
+        if task_type != "binary_classification":
+            raise ValueError(f"Unsupported task_type for this trainer: {task_type!r}")
         metric_prefix = training_cfg["metric_prefix"]
         return {
             f"{metric_prefix}_f1": f1_score(labels, predictions, zero_division=0),

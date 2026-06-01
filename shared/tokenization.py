@@ -15,6 +15,7 @@ def tokenize_text_split(
     text_column: str = "text",
     max_length: int,
     padding: str = "max_length",
+    label_columns: tuple[str, ...] = ("labels",),
 ) -> Dataset:
     return split.map(
         lambda batch: _tokenize_text_batch(
@@ -23,6 +24,7 @@ def tokenize_text_split(
             text_column=text_column,
             max_length=max_length,
             padding=padding,
+            label_columns=label_columns,
         ),
         batched=True,
     )
@@ -35,6 +37,7 @@ def _tokenize_text_batch(
     text_column: str,
     max_length: int,
     padding: str,
+    label_columns: tuple[str, ...],
 ) -> dict[str, Any]:
     enc = tokenizer(
         batch[text_column],
@@ -42,7 +45,7 @@ def _tokenize_text_batch(
         max_length=max_length,
         padding=padding,
     )
-    for column in ("labels", "label", "binary_label", "category_labels"):
+    for column in label_columns:
         if column in batch:
             enc[column] = batch[column]
     return enc
@@ -56,6 +59,7 @@ def tokenize_pair_split(
     text_b_column: str = "hypothesis",
     max_length: int,
     padding: str = "max_length",
+    label_columns: tuple[str, ...] = ("labels",),
 ) -> Dataset:
     return split.map(
         lambda batch: _tokenize_pair_batch(
@@ -65,6 +69,7 @@ def tokenize_pair_split(
             text_b_column=text_b_column,
             max_length=max_length,
             padding=padding,
+            label_columns=label_columns,
         ),
         batched=True,
     )
@@ -78,6 +83,7 @@ def _tokenize_pair_batch(
     text_b_column: str,
     max_length: int,
     padding: str,
+    label_columns: tuple[str, ...],
 ) -> dict[str, Any]:
     enc = tokenizer(
         batch[text_a_column],
@@ -86,7 +92,7 @@ def _tokenize_pair_batch(
         max_length=max_length,
         padding=padding,
     )
-    for column in ("labels", "label", "binary_label", "category_labels"):
+    for column in label_columns:
         if column in batch:
             enc[column] = batch[column]
     return enc
@@ -99,6 +105,7 @@ def tokenize_dataset_dict(
     kind: str,
     max_length: int,
     text_columns: tuple[str, ...] = ("text",),
+    label_columns: tuple[str, ...] = ("labels",),
     padding: str = "max_length",
 ) -> DatasetDict:
     tokenized_splits = {}
@@ -110,6 +117,7 @@ def tokenize_dataset_dict(
                 text_column=text_columns[0],
                 max_length=max_length,
                 padding=padding,
+                label_columns=label_columns,
             )
         elif kind == "pair":
             tokenized_splits[split_name] = tokenize_pair_split(
@@ -119,6 +127,7 @@ def tokenize_dataset_dict(
                 text_b_column=text_columns[1],
                 max_length=max_length,
                 padding=padding,
+                label_columns=label_columns,
             )
         else:
             raise ValueError(f"Unknown tokenization kind: {kind!r}")

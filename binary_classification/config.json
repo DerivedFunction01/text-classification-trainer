@@ -1,10 +1,13 @@
 {
+  "task_type": "binary_classification",
   "model": {
     "name": "distilbert/distilbert-base-uncased",
     "output_dir": "distilbert-classifier",
     "num_labels": 2
   },
   "dataset": {
+    "label_column": "label",
+    "text_columns": ["text"],
     "source": {
       "type": "hf_dataset",
       "dataset_name": "rotten_tomatoes",
@@ -12,15 +15,18 @@
       "split": "train"
     },
     "cache_dir": ".cache/test/tokenized",
-    "val_size": 0.1,
-    "test_size": 0.1,
+    "split_strategy": {
+      "type": "random",
+      "val_size": 0.1,
+      "test_size": 0.1
+    },
     "seed": 42
   },
   "tokenization": {
     "kind": "text",
-    "text_columns": ["text"],
     "max_length": 512,
-    "padding": "max_length"
+    "padding": "max_length",
+    "label_columns": ["label", "labels", "binary_label", "category_labels"]
   },
   "training": {
     "num_train_epochs": 2,

@@ -23,6 +23,7 @@ def _resolve_path(value: str | Path) -> Path:
 def load_dataset_from_config(config: dict[str, Any]) -> DatasetDict:
     source = config["dataset"]["source"]
     source_type = source["type"]
+    dataset_cfg = config["dataset"]
 
     if source_type == "hf_dataset_dict":
         dataset = load_hf_dataset_dict(source["dataset_name"], config=source.get("config"))
@@ -38,9 +39,9 @@ def load_dataset_from_config(config: dict[str, Any]) -> DatasetDict:
         rows = dataset.to_list()
         return rows_to_dataset_dict(
             rows,
-            val_size=config["dataset"].get("val_size"),
-            test_size=config["dataset"].get("test_size"),
-            seed=config["dataset"].get("seed", 42),
+            val_size=dataset_cfg["split_strategy"].get("val_size"),
+            test_size=dataset_cfg["split_strategy"].get("test_size"),
+            seed=dataset_cfg.get("seed", 42),
             columns=dataset.column_names,
         )
 
@@ -56,6 +57,7 @@ def load_dataset_from_config(config: dict[str, Any]) -> DatasetDict:
 def build_and_cache_dataset(config: dict[str, Any]) -> DatasetDict:
     dataset_cfg = config["dataset"]
     cache_dir = _resolve_path(dataset_cfg["cache_dir"])
+    label_column = dataset_cfg["label_column"]
     meta_path = cache_dir / "dataset.meta.json"
     expected_meta = {
         "dataset": dataset_cfg,
@@ -75,10 +77,13 @@ def build_and_cache_dataset(config: dict[str, Any]) -> DatasetDict:
         raw_dataset,
         tokenizer=tokenizer,
         kind=config["tokenization"]["kind"],
-        text_columns=tuple(config["tokenization"]["text_columns"]),
+        text_columns=tuple(dataset_cfg["text_columns"]),
+        label_columns=tuple(config["tokenization"]["label_columns"]),
         max_length=config["tokenization"]["max_length"],
         padding=config["tokenization"].get("padding", "max_length"),
     )
+    if label_column != "labels":
+        tokenized = tokenized.rename_column(label_column, "labels")
     save_tokenized_dataset_cache(
         tokenized,
         str(cache_dir),
