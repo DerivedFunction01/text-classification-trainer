@@ -175,7 +175,17 @@ model = AutoModelForSequenceClassification.from_pretrained(
 
 def compute_metrics(eval_pred):
     logits, labels = eval_pred
-    predictions = np.argmax(logits, axis=-1)
+    logits = np.asarray(logits)
+    labels = np.asarray(labels)
+
+    if logits.ndim == 1 or logits.shape[-1] == 1:
+        probabilities = 1.0 / (1.0 + np.exp(-logits.reshape(-1)))
+    else:
+        shifted = logits - np.max(logits, axis=-1, keepdims=True)
+        exp_logits = np.exp(shifted)
+        probabilities = exp_logits[:, 1] / np.sum(exp_logits, axis=-1)
+
+    predictions = (probabilities >= CONFIG["threshold"]).astype(int)
     return {
         "binary_f1": f1_score(labels, predictions, zero_division=0),
         "binary_precision": precision_score(labels, predictions, zero_division=0),
