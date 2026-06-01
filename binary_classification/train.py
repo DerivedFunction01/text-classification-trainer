@@ -43,7 +43,7 @@ WARMUP_RATIO = 0.1
 
 BASE_DIR = Path(".")
 HF_TOKEN_PATH = BASE_DIR / "hf_token"
-TOKENIZED_CACHE_DIR = BASE_DIR / ".cache" / "xlm_roberta_other" / "safety" / "tokenized"
+TOKENIZED_CACHE_DIR = BASE_DIR / ".cache" / "test" / "tokenized"
 TOKENIZED_CACHE_META = TOKENIZED_CACHE_DIR / "dataset.meta.json"
 
 random.seed(CONFIG["seed"])
@@ -123,7 +123,7 @@ def make_training_args(
 
 # %%
 if not TOKENIZED_CACHE_META.exists():
-    raise RuntimeError("Tokenized safety cache not found. Run the build script first.")
+    raise RuntimeError("Tokenized cache not found. Run the build script first.")
 
 with TOKENIZED_CACHE_META.open(encoding="utf-8") as f:
     meta = json.load(f)
@@ -132,26 +132,15 @@ if (
     meta.get("model_name") != CONFIG["model_name"]
     or meta.get("max_length") != CONFIG["max_length"]
 ):
-    raise RuntimeError("Safety cache metadata does not match the current config.")
+    raise RuntimeError("Cache metadata does not match the current config.")
 
 ds = load_cached_dataset(TOKENIZED_CACHE_DIR)
-binary_label2id = {"safe": 0, "unsafe": 1}
-binary_id2label = {0: "safe", 1: "unsafe"}
 
 print(f"  Train: {len(ds['train']):,}")
 print(f"  Val:   {len(ds['val']):,}")
 print(f"  Test:  {len(ds['test']):,}")
 print(f"  GPU count: {get_world_size()}")
-binary_counts = meta.get("binary_label_counts", {})
-num_examples = int(meta.get("num_examples", len(ds["train"])))
-if binary_counts:
-    print("  Binary distribution:")
-    for label, count in sorted(binary_counts.items()):
-        rate = meta.get("binary_label_rates", {}).get(label)
-        if rate is None:
-            print(f"    {label}: {count}")
-        else:
-            print(f"    {label}: {count} ({rate:.3%})")
+
 warmup_steps = compute_warmup_steps(len(ds["train"]))
 eval_interval = compute_step_interval(
     len(ds["train"]), checkpoints_per_epoch=CONFIG["evals_per_epoch"]
@@ -174,30 +163,13 @@ print(f"Loading model: {CONFIG['model_name']}")
 model = AutoModelForSequenceClassification.from_pretrained(
     CONFIG["model_name"],
     num_labels=2,
-    id2label=binary_id2label,
-    label2id=binary_label2id,
+    id2label={},
+    label2id={},
     token=HF_TOKEN,
 )
 
 def compute_metrics(eval_pred):
-    predictions, label_ids = eval_pred
-    predictions = np.asarray(predictions)
-    if predictions.ndim != 2 or predictions.shape[1] < 2:
-        raise RuntimeError("Expected binary classification logits from Trainer")
-    shifted = predictions - predictions.max(axis=1, keepdims=True)
-    probs = np.exp(shifted)
-    binary_probs = probs[:, 1] / probs.sum(axis=1)
-    binary_preds = (binary_probs >= CONFIG["threshold"]).astype(int)
-    binary_labels = np.asarray(label_ids).astype(int)
-
-    binary_f1 = f1_score(binary_labels, binary_preds, zero_division=0)
-    binary_precision = precision_score(binary_labels, binary_preds, zero_division=0)
-    binary_recall = recall_score(binary_labels, binary_preds, zero_division=0)
-    return {
-        "binary_f1": float(binary_f1),
-        "binary_precision": float(binary_precision),
-        "binary_recall": float(binary_recall),
-    }
+    pass
 
 
 trainer = Trainer(
@@ -220,5 +192,5 @@ print(trainer.evaluate(ds["test"])) # type: ignore
 tokenizer = AutoTokenizer.from_pretrained(CONFIG["model_name"], token=HF_TOKEN)
 trainer.save_model(CONFIG["output_dir"])
 tokenizer.save_pretrained(CONFIG["output_dir"])
-print(f"\nBinary-only model saved to: {CONFIG['output_dir']}")
+print(f"\nModel saved to: {CONFIG['output_dir']}")
 trainer.push_to_hub()
