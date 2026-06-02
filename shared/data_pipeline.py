@@ -119,32 +119,53 @@ def _apply_label_transform(dataset: DatasetDict, dataset_cfg: dict[str, Any]) ->
             raw_targets,
             target_label_to_index=target_label_to_index,
         )
+    source_label_rows: dict[str, list[tuple[str, int, dict[str, Any]]]] = {}
+    source_label_order: list[str] = []
+    for split_name, split in dataset.items():
+        for row_index, row in enumerate(split):
+            key = _to_label_lookup_key(row[source_column])
+            if key not in source_label_rows:
+                source_label_rows[key] = []
+                source_label_order.append(key)
+            source_label_rows[key].append((split_name, row_index, dict(row)))
+
+    reserve_assignments: dict[tuple[str, int], str] = {}
+    if reserve_fraction > 0.0:
+        reserve_rng = random.Random(int(dataset_cfg.get("seed", 42)))
+        for label_key, rows in source_label_rows.items():
+            reserve_count = int(len(rows) * reserve_fraction)
+            if reserve_count <= 0:
+                continue
+            other_labels = [candidate for candidate in source_label_order if candidate != label_key]
+            if not other_labels:
+                raise ValueError("reserve_fraction requires at least 2 distinct labels")
+            sampled_rows = reserve_rng.sample(rows, k=reserve_count)
+            for split_name, row_index, _row in sampled_rows:
+                reserve_assignments[(split_name, row_index)] = reserve_rng.choice(other_labels)
 
     def transform_split(split_name: str, split: Dataset) -> Dataset:
-        seed_offset = abs(hash(split_name)) % (2**32)
-
-        def map_row(row: dict[str, Any]) -> dict[str, Any]:
+        transformed_rows: list[dict[str, Any]] = []
+        for row_index, row in enumerate(tqdm(split.to_list(), desc=f"Label transform {split_name}", unit="row")):
             row = dict(row)
+            source_key = _to_label_lookup_key(row[source_column])
             labels = _build_multilabel_vector(
                 row[source_column],
                 label_to_indices=label_to_indices,
                 num_labels=len(target_labels),
             )
-            if reserve_fraction > 0.0 and len(target_labels) > 1:
-                rng = random.Random(int(dataset_cfg.get("seed", 42)) + seed_offset + int(row.get("__row_index__", 0)))
-                if rng.random() < reserve_fraction:
-                    primary_indices = label_to_indices[_to_label_lookup_key(row[source_column])]
-                    secondary_candidates = [index for index in range(len(target_labels)) if index not in primary_indices]
-                    if secondary_candidates:
-                        labels[rng.choice(secondary_candidates)] = 1
+            mixed_target = reserve_assignments.get((split_name, row_index))
+            if mixed_target is not None:
+                pair_target_indices = label_to_indices.get(mixed_target)
+                if pair_target_indices is None:
+                    raise KeyError(f"Missing multi-label mapping for source label: {mixed_target!r}")
+                for target_index in pair_target_indices:
+                    labels[target_index] = 1
             row[output_column] = labels
-            return row
+            transformed_rows.append(row)
 
-        indexed_split = split.add_column("__row_index__", list(range(len(split))))
-        transformed = indexed_split.map(map_row)
-        if "__row_index__" in transformed.column_names:
-            transformed = transformed.remove_columns(["__row_index__"])
-        return transformed
+        if not transformed_rows:
+            return Dataset.from_dict({column: [] for column in split.column_names})
+        return Dataset.from_list(transformed_rows)
 
     return DatasetDict({split_name: transform_split(split_name, split) for split_name, split in dataset.items()})
 
