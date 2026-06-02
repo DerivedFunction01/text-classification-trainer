@@ -59,6 +59,31 @@ def _normalize_label_targets(
     return indices
 
 
+def _infer_label_transform(
+    dataset: DatasetDict,
+    *,
+    source_column: str,
+) -> tuple[list[Any], dict[str, list[Any]]]:
+    seen: set[str] = set()
+    target_labels: list[Any] = []
+    label_map: dict[str, list[Any]] = {}
+
+    for split_name, split in dataset.items():
+        for row in tqdm(split, desc=f"Inferring labels from {split_name}", unit="row"):
+            source_label = row[source_column]
+            key = _to_label_lookup_key(source_label)
+            if key in seen:
+                continue
+            seen.add(key)
+            target_labels.append(source_label)
+            label_map[key] = [source_label]
+
+    if not target_labels:
+        raise ValueError(f"Could not infer any labels from column {source_column!r}")
+
+    return target_labels, label_map
+
+
 def _apply_label_transform(dataset: DatasetDict, dataset_cfg: dict[str, Any]) -> DatasetDict:
     label_transform = dataset_cfg.get("label_transform")
     if not label_transform:
@@ -71,10 +96,12 @@ def _apply_label_transform(dataset: DatasetDict, dataset_cfg: dict[str, Any]) ->
     output_column = label_transform.get("output_column", "labels")
     target_labels = label_transform.get("target_labels")
     label_map = label_transform.get("label_map")
+    if target_labels is None and label_map is None:
+        target_labels, label_map = _infer_label_transform(dataset, source_column=source_column)
     if not isinstance(target_labels, list) or not target_labels:
-        raise ValueError("label_transform.target_labels must be a non-empty list")
+        raise ValueError("label_transform.target_labels must be a non-empty list or omitted for inference")
     if not isinstance(label_map, dict) or not label_map:
-        raise ValueError("label_transform.label_map must be a non-empty object")
+        raise ValueError("label_transform.label_map must be a non-empty object or omitted for inference")
 
     target_label_to_index = {_to_label_lookup_key(label): index for index, label in enumerate(target_labels)}
     label_to_indices: dict[str, list[int]] = {}

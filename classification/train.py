@@ -182,6 +182,17 @@ def _compute_multi_label_metrics(
     }
 
 
+def infer_num_labels_from_dataset(ds: DatasetDict) -> int:
+    sample = ds["train"][0]
+    labels = sample["labels"]
+    if not isinstance(labels, (list, tuple, np.ndarray)):
+        raise TypeError(f"Expected multi-label dataset labels to be a sequence, got {type(labels)!r}")
+    num_labels = len(labels)
+    if num_labels < 2:
+        raise ValueError(f"Expected at least 2 labels for multi-label classification, got {num_labels}")
+    return num_labels
+
+
 def main() -> None:
     config = load_config()
     model_cfg = config["model"]
@@ -229,13 +240,23 @@ def main() -> None:
         ds[split_name].set_format("torch", columns=["input_ids", "attention_mask", "labels"])
 
     print(f"Loading model: {model_cfg['name']}")
+    model_kwargs = {"token": hf_token}
+    if model_cfg.get("num_labels") is not None:
+        model_kwargs["num_labels"] = int(model_cfg["num_labels"])
     model = AutoModelForSequenceClassification.from_pretrained(
         model_cfg["name"],
-        num_labels=model_cfg["num_labels"],
-        token=hf_token,
+        **model_kwargs,
     )
     if task_type == "multi_label_classification":
         model.config.problem_type = "multi_label_classification"
+        inferred_num_labels = infer_num_labels_from_dataset(ds)
+        configured_num_labels = model_cfg.get("num_labels")
+        if configured_num_labels is not None and int(configured_num_labels) != inferred_num_labels:
+            raise ValueError(
+                f"Configured model.num_labels={configured_num_labels} does not match inferred "
+                f"dataset label count {inferred_num_labels}"
+            )
+        model.config.num_labels = inferred_num_labels
 
     def compute_metrics(eval_pred):
         logits, labels = eval_pred
