@@ -53,6 +53,8 @@ def load_config() -> dict[str, object]:
 
     if not working_config_path.exists():
         working_config_path.write_text(config_path.read_text(encoding="utf-8"), encoding="utf-8")
+        print(f"Created editable config copy: {working_config_path}")
+        raise SystemExit(0)
 
     return load_json_config(working_config_path)
 
