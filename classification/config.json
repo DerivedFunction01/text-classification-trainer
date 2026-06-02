@@ -23,7 +23,15 @@
       "type": "single_to_multi_label",
       "source_column": "label",
       "output_column": "labels",
-      "reserve_fraction": 0.1
+      "reserve_fraction": 0.1,
+      "label_names": {
+          "0": "sadness",
+          "1": "joy",
+          "2": "love",
+          "3": "anger",
+          "4": "fear",
+          "5": "surprise"
+      }
     },
     "source": {
       "type": "hf_dataset",
