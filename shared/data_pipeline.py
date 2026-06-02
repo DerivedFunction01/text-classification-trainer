@@ -84,6 +84,21 @@ def _infer_label_transform(
     return target_labels, label_map
 
 
+def _build_label_display_names(
+    target_labels: list[Any],
+    *,
+    label_names: dict[Any, Any] | None = None,
+) -> list[str]:
+    display_names: list[str] = []
+    label_names = label_names or {}
+    for label in target_labels:
+        display_value = label_names.get(label, label_names.get(_to_label_lookup_key(label), label))
+        if display_value is None:
+            display_value = label
+        display_names.append(_to_label_lookup_key(display_value))
+    return display_names
+
+
 def _apply_label_transform(
     dataset: DatasetDict,
     dataset_cfg: dict[str, Any],
@@ -100,12 +115,15 @@ def _apply_label_transform(
     reserve_fraction = float(label_transform.get("reserve_fraction", 0.0))
     target_labels = label_transform.get("target_labels")
     label_map = label_transform.get("label_map")
+    label_names = label_transform.get("label_names")
     if target_labels is None and label_map is None:
         target_labels, label_map = _infer_label_transform(dataset, source_column=source_column)
     if not isinstance(target_labels, list) or not target_labels:
         raise ValueError("label_transform.target_labels must be a non-empty list or omitted for inference")
     if not isinstance(label_map, dict) or not label_map:
         raise ValueError("label_transform.label_map must be a non-empty object or omitted for inference")
+    if label_names is not None and not isinstance(label_names, dict):
+        raise ValueError("label_transform.label_names must be an object when provided")
     if not 0.0 <= reserve_fraction <= 1.0:
         raise ValueError("label_transform.reserve_fraction must be in the range [0.0, 1.0]")
     if reserve_fraction > 0.0 and len(target_labels) < 2:
@@ -172,8 +190,9 @@ def _apply_label_transform(
             return Dataset.from_dict({column: [] for column in split.column_names})
         return Dataset.from_list(transformed_rows)
 
-    label2id = {_to_label_lookup_key(label): index for index, label in enumerate(target_labels)}
-    id2label = {str(index): _to_label_lookup_key(label) for index, label in enumerate(target_labels)}
+    display_labels = _build_label_display_names(target_labels, label_names=label_names)
+    label2id = {display_label: index for index, display_label in enumerate(display_labels)}
+    id2label = {str(index): display_label for index, display_label in enumerate(display_labels)}
     metadata = {
         "label2id": label2id,
         "id2label": id2label,
@@ -181,6 +200,7 @@ def _apply_label_transform(
         "label_column": source_column,
         "output_column": output_column,
         "task_type": "multi_label_classification",
+        "raw_labels": [_to_label_lookup_key(label) for label in target_labels],
     }
     return DatasetDict({split_name: transform_split(split_name, split) for split_name, split in dataset.items()}), metadata
 
