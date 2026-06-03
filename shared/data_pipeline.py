@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import random
+import hashlib
 from pathlib import Path
 from typing import Any
 
@@ -112,6 +113,22 @@ def _combine_text_values(primary: Any, secondary: Any, *, separator: str = " ") 
     return primary
 
 
+def _combine_text_series(values: list[Any], *, separator: str = " ") -> Any:
+    text_values = [value.strip() for value in values if isinstance(value, str) and value.strip()]
+    if not text_values:
+        return values[0] if values else ""
+    return separator.join(text_values)
+
+
+def _remove_items_by_identity(rows: list[dict[str, Any]], items_to_remove: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    remaining: list[dict[str, Any]] = []
+    removal_ids = {id(item) for item in items_to_remove}
+    for row in rows:
+        if id(row) not in removal_ids:
+            remaining.append(row)
+    return remaining
+
+
 def _cast_multilabel_labels_to_float(dataset: DatasetDict) -> DatasetDict:
     def cast_split(split: Dataset) -> Dataset:
         return split.map(
@@ -137,6 +154,7 @@ def _apply_label_transform(
     output_column = label_transform.get("output_column", "labels")
     reserve_fraction = float(label_transform.get("reserve_fraction", 0.0))
     reserve_separator = str(label_transform.get("reserve_separator", " "))
+    same_label_pack_size = int(label_transform.get("same_label_pack_size", 3))
     target_labels = label_transform.get("target_labels")
     label_map = label_transform.get("label_map")
     label_names = label_transform.get("label_names")
@@ -150,6 +168,8 @@ def _apply_label_transform(
         raise ValueError("label_transform.label_names must be an object when provided")
     if not 0.0 <= reserve_fraction <= 1.0:
         raise ValueError("label_transform.reserve_fraction must be in the range [0.0, 1.0]")
+    if same_label_pack_size < 1:
+        raise ValueError("label_transform.same_label_pack_size must be >= 1")
     if reserve_fraction > 0.0 and len(target_labels) < 2:
         raise ValueError("label_transform.reserve_fraction requires at least 2 target labels")
     text_columns = tuple(dataset_cfg.get("text_columns", ()))
@@ -167,58 +187,90 @@ def _apply_label_transform(
             raw_targets,
             target_label_to_index=target_label_to_index,
         )
-    source_label_rows: dict[str, list[tuple[str, int, dict[str, Any]]]] = {}
+    source_label_rows: dict[str, list[dict[str, Any]]] = {}
     source_label_order: list[str] = []
     for split_name, split in dataset.items():
-        for row_index, row in enumerate(split):
+        for row in split:
             key = _to_label_lookup_key(row[source_column])
             if key not in source_label_rows:
                 source_label_rows[key] = []
                 source_label_order.append(key)
-            source_label_rows[key].append((split_name, row_index, dict(row)))
+            source_label_rows[key].append(dict(row))
 
-    reserve_assignments: dict[tuple[str, int], tuple[str, dict[str, Any]]] = {}
-    if reserve_fraction > 0.0:
-        reserve_rng = random.Random(int(dataset_cfg.get("seed", 42)))
-        for label_key, rows in source_label_rows.items():
-            reserve_count = int(len(rows) * reserve_fraction)
-            if reserve_count <= 0:
-                continue
-            other_labels = [candidate for candidate in source_label_order if candidate != label_key]
-            if not other_labels:
-                raise ValueError("reserve_fraction requires at least 2 distinct labels")
-            sampled_rows = reserve_rng.sample(rows, k=reserve_count)
-            for split_name, row_index, _row in sampled_rows:
-                partner_label = reserve_rng.choice(other_labels)
-                partner_rows = source_label_rows[partner_label]
-                partner_row = dict(reserve_rng.choice(partner_rows)[2])
-                reserve_assignments[(split_name, row_index)] = (partner_label, partner_row)
+    def _build_pack(chunk: list[dict[str, Any]]) -> dict[str, Any]:
+        row = dict(chunk[0])
+        for column in text_columns:
+            if column in row:
+                row[column] = _combine_text_series(
+                    [item[column] for item in chunk if column in item],
+                    separator=reserve_separator,
+                )
+        row[output_column] = _build_multilabel_vector(
+            row[source_column],
+            label_to_indices=label_to_indices,
+            num_labels=len(target_labels),
+        )
+        if source_column != output_column and source_column in row:
+            del row[source_column]
+        return row
 
     def transform_split(split_name: str, split: Dataset) -> Dataset:
+        split_rows = split.to_list()
+        rows_by_label: dict[str, list[dict[str, Any]]] = {}
+        for row in split_rows:
+            key = _to_label_lookup_key(row[source_column])
+            rows_by_label.setdefault(key, []).append(dict(row))
+
         transformed_rows: list[dict[str, Any]] = []
-        for row_index, row in enumerate(tqdm(split.to_list(), desc=f"Label transform {split_name}", unit="row")):
-            row = dict(row)
-            source_key = _to_label_lookup_key(row[source_column])
-            labels = _build_multilabel_vector(
-                row[source_column],
-                label_to_indices=label_to_indices,
-                num_labels=len(target_labels),
-            )
-            mixed_target = reserve_assignments.get((split_name, row_index))
-            if mixed_target is not None:
-                partner_label, partner_row = mixed_target
-                pair_target_indices = label_to_indices.get(partner_label)
-                if pair_target_indices is None:
-                    raise KeyError(f"Missing multi-label mapping for source label: {partner_label!r}")
-                for target_index in pair_target_indices:
-                    labels[target_index] = 1
-                for column in text_columns:
-                    if column in row and column in partner_row:
-                        row[column] = _combine_text_values(row[column], partner_row[column], separator=reserve_separator)
-            row[output_column] = labels
-            if source_column != output_column and source_column in row:
-                del row[source_column]
-            transformed_rows.append(row)
+        split_hash = int.from_bytes(hashlib.sha256(split_name.encode("utf-8")).digest()[:4], "big")
+        reserve_rng = random.Random(int(dataset_cfg.get("seed", 42)) + split_hash)
+
+        reserve_rows_by_label: dict[str, list[dict[str, Any]]] = {}
+        free_rows_by_label: dict[str, list[dict[str, Any]]] = {}
+        for label_key, rows in rows_by_label.items():
+            reserve_count = int(len(rows) * reserve_fraction) if reserve_fraction > 0.0 else 0
+            reserve_rows = reserve_rng.sample(rows, k=reserve_count) if reserve_count > 0 else []
+            reserve_rows_by_label[label_key] = reserve_rows
+            free_rows_by_label[label_key] = _remove_items_by_identity(rows, reserve_rows)
+
+        for label_key in source_label_order:
+            free_rows = free_rows_by_label.get(label_key, [])
+            for start in range(0, len(free_rows), same_label_pack_size):
+                chunk = free_rows[start : start + same_label_pack_size]
+                if chunk:
+                    transformed_rows.append(_build_pack(chunk))
+
+        if reserve_fraction > 0.0:
+            label_keys = list(source_label_order)
+            for label_key in source_label_order:
+                reserve_rows = reserve_rows_by_label.get(label_key, [])
+                other_labels = [candidate for candidate in label_keys if candidate != label_key]
+                if not other_labels:
+                    raise ValueError("reserve_fraction requires at least 2 distinct labels")
+                for reserve_row in reserve_rows:
+                    partner_label = reserve_rng.choice(other_labels)
+                    partner_rows = free_rows_by_label.get(partner_label, [])
+                    if not partner_rows:
+                        partner_rows = rows_by_label.get(partner_label, [])
+                    partner_row = dict(reserve_rng.choice(partner_rows))
+                    mixed_row = dict(reserve_row)
+                    for column in text_columns:
+                        if column in mixed_row and column in partner_row:
+                            mixed_row[column] = _combine_text_values(
+                                mixed_row[column],
+                                partner_row[column],
+                                separator=reserve_separator,
+                            )
+                    mixed_row[output_column] = _build_multilabel_vector(
+                        reserve_row[source_column],
+                        label_to_indices=label_to_indices,
+                        num_labels=len(target_labels),
+                    )
+                    for target_index in label_to_indices[partner_label]:
+                        mixed_row[output_column][target_index] = 1
+                    if source_column != output_column and source_column in mixed_row:
+                        del mixed_row[source_column]
+                    transformed_rows.append(mixed_row)
 
         if not transformed_rows:
             return Dataset.from_dict({column: [] for column in split.column_names})
