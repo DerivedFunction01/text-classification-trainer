@@ -526,6 +526,46 @@ def _perturb_row(
     return output_rows
 
 
+def _perturb_rows_chunk(
+    rows: list[dict[str, Any]],
+    *,
+    source_column: str,
+    output_column: str,
+    lang_column: str | None,
+    base_seed: int,
+    seed_offset: int,
+    start_row_index: int,
+    num_variants: int,
+) -> list[dict[str, Any]]:
+    if _PERTURBATION_MUTATOR is None:
+        raise RuntimeError("Perturbation worker was not initialized")
+
+    transformed_rows: list[dict[str, Any]] = []
+    for offset, row in enumerate(rows):
+        row_index = start_row_index + offset
+        text = row.get(source_column)
+        if not isinstance(text, str):
+            raise TypeError(f"Expected text column {source_column!r} to contain strings, got {type(text)!r}")
+
+        rng = random.Random(base_seed + seed_offset + row_index)
+        variants = _PERTURBATION_MUTATOR.augment(text, rng=rng, lang=row.get(lang_column) if lang_column else None)
+        if num_variants == 1:
+            chosen_variant = variants[0] if variants else text
+            mutated_row = dict(row)
+            mutated_row[output_column] = chosen_variant
+            transformed_rows.append(mutated_row)
+            continue
+
+        if _PERTURBATION_MUTATOR.config.keep_original:
+            transformed_rows.append(dict(row))
+
+        for variant in variants[:num_variants]:
+            mutated_row = dict(row)
+            mutated_row[output_column] = variant
+            transformed_rows.append(mutated_row)
+    return transformed_rows
+
+
 def _apply_text_perturbation(dataset: DatasetDict, dataset_cfg: dict[str, Any]) -> DatasetDict:
     perturbation = dataset_cfg.get("text_perturbation")
     if not perturbation:
@@ -551,26 +591,38 @@ def _apply_text_perturbation(dataset: DatasetDict, dataset_cfg: dict[str, Any]) 
 
         split_rows = split.to_list()
         transformed_rows: list[dict[str, Any]] = []
+        chunk_count = min(max_workers, len(split_rows))
+        if chunk_count <= 0:
+            return Dataset.from_dict({column: [] for column in split.column_names})
+        chunk_size = (len(split_rows) + chunk_count - 1) // chunk_count
+        chunks: list[tuple[int, list[dict[str, Any]]]] = []
+        for chunk_index in range(chunk_count):
+            start = chunk_index * chunk_size
+            end = min(start + chunk_size, len(split_rows))
+            if start >= end:
+                break
+            chunks.append((start, split_rows[start:end]))
+
         with ProcessPoolExecutor(
             max_workers=max_workers,
             initializer=_init_perturbation_worker,
             initargs=(mutation_config_dict,),
         ) as executor:
-            tasks = (
+            tasks = [
                 executor.submit(
-                    _perturb_row,
-                    row,
+                    _perturb_rows_chunk,
+                    rows,
                     source_column=source_column,
                     output_column=output_column,
                     lang_column=lang_column,
                     base_seed=base_seed,
                     seed_offset=seed_offset,
-                    row_index=row_index,
+                    start_row_index=start_row_index,
                     num_variants=num_variants,
                 )
-                for row_index, row in enumerate(split_rows)
-            )
-            for task in tqdm(tasks, total=len(split_rows), desc=f"Perturbing {split_name}", unit="row"):
+                for start_row_index, rows in chunks
+            ]
+            for task in tqdm(tasks, total=len(tasks), desc=f"Perturbing {split_name}", unit="chunk"):
                 transformed_rows.extend(task.result())
 
         if not transformed_rows:
