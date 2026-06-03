@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import os
 import random
 import hashlib
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +24,7 @@ from shared.archive import zip_cache_subdir
 from text_utils import MutationConfig, TextMutator
 
 CACHE_FORMAT_VERSION = 2
+_PERTURBATION_MUTATOR: TextMutator | None = None
 
 
 def _resolve_path(value: str | Path) -> Path:
@@ -481,6 +484,48 @@ def _mutation_config_from_dict(config: dict[str, Any] | None) -> MutationConfig:
     return MutationConfig(**kwargs)
 
 
+def _init_perturbation_worker(mutation_config: dict[str, Any]) -> None:
+    global _PERTURBATION_MUTATOR
+    _PERTURBATION_MUTATOR = TextMutator(MutationConfig(**mutation_config))
+
+
+def _perturb_row(
+    row: dict[str, Any],
+    *,
+    source_column: str,
+    output_column: str,
+    lang_column: str | None,
+    base_seed: int,
+    seed_offset: int,
+    row_index: int,
+    num_variants: int,
+) -> list[dict[str, Any]]:
+    if _PERTURBATION_MUTATOR is None:
+        raise RuntimeError("Perturbation worker was not initialized")
+
+    text = row.get(source_column)
+    if not isinstance(text, str):
+        raise TypeError(f"Expected text column {source_column!r} to contain strings, got {type(text)!r}")
+
+    rng = random.Random(base_seed + seed_offset + row_index)
+    variants = _PERTURBATION_MUTATOR.augment(text, rng=rng, lang=row.get(lang_column) if lang_column else None)
+    if num_variants == 1:
+        chosen_variant = variants[0] if variants else text
+        mutated_row = dict(row)
+        mutated_row[output_column] = chosen_variant
+        return [mutated_row]
+
+    output_rows: list[dict[str, Any]] = []
+    if _PERTURBATION_MUTATOR.config.keep_original:
+        output_rows.append(dict(row))
+
+    for variant in variants[:num_variants]:
+        mutated_row = dict(row)
+        mutated_row[output_column] = variant
+        output_rows.append(mutated_row)
+    return output_rows
+
+
 def _apply_text_perturbation(dataset: DatasetDict, dataset_cfg: dict[str, Any]) -> DatasetDict:
     perturbation = dataset_cfg.get("text_perturbation")
     if not perturbation:
@@ -494,8 +539,9 @@ def _apply_text_perturbation(dataset: DatasetDict, dataset_cfg: dict[str, Any]) 
         raise ValueError("text_perturbation.num_variants must be >= 1")
 
     mutation_config = _mutation_config_from_dict(perturbation.get("mutation_config"))
-    mutator = TextMutator(mutation_config)
     base_seed = int(dataset_cfg.get("seed", 42))
+    max_workers = max((os.cpu_count() or 1) - 1, 1)
+    mutation_config_dict = dict(perturbation.get("mutation_config") or {})
 
     def transform_split(split_name: str, split: Dataset) -> Dataset:
         if num_variants == 1 and not mutation_config.keep_original:
@@ -503,28 +549,29 @@ def _apply_text_perturbation(dataset: DatasetDict, dataset_cfg: dict[str, Any]) 
 
         seed_offset = abs(hash(split_name)) % (2**32)
 
+        split_rows = split.to_list()
         transformed_rows: list[dict[str, Any]] = []
-        for row_index, row in enumerate(tqdm(split.to_list(), desc=f"Perturbing {split_name}", unit="row")):
-            text = row.get(source_column)
-            if not isinstance(text, str):
-                raise TypeError(f"Expected text column {source_column!r} to contain strings, got {type(text)!r}")
-
-            rng = random.Random(base_seed + seed_offset + row_index)
-            variants = mutator.augment(text, rng=rng, lang=row.get(lang_column) if lang_column else None)
-            if num_variants == 1:
-                chosen_variant = variants[0] if variants else text
-                mutated_row = dict(row)
-                mutated_row[output_column] = chosen_variant
-                transformed_rows.append(mutated_row)
-                continue
-
-            if mutation_config.keep_original:
-                transformed_rows.append(dict(row))
-
-            for variant in variants[:num_variants]:
-                mutated_row = dict(row)
-                mutated_row[output_column] = variant
-                transformed_rows.append(mutated_row)
+        with ProcessPoolExecutor(
+            max_workers=max_workers,
+            initializer=_init_perturbation_worker,
+            initargs=(mutation_config_dict,),
+        ) as executor:
+            tasks = (
+                executor.submit(
+                    _perturb_row,
+                    row,
+                    source_column=source_column,
+                    output_column=output_column,
+                    lang_column=lang_column,
+                    base_seed=base_seed,
+                    seed_offset=seed_offset,
+                    row_index=row_index,
+                    num_variants=num_variants,
+                )
+                for row_index, row in enumerate(split_rows)
+            )
+            for task in tqdm(tasks, total=len(split_rows), desc=f"Perturbing {split_name}", unit="row"):
+                transformed_rows.extend(task.result())
 
         if not transformed_rows:
             return Dataset.from_dict({column: [] for column in split.column_names})
