@@ -25,7 +25,7 @@
       "type": "single_to_multi_label",
       "source_column": "label",
       "output_column": "labels",
-      "reserve_fraction": 0.25,
+      "reserve_fraction": 0.15,
       "same_label_pack_size": 3,
       "label_names": {
         "0": "sadness",
