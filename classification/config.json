@@ -12,8 +12,8 @@
     "cache_dir": ".cache/emotions/tokenized",
     "split_strategy": {
       "type": "random",
-      "val_size": 0.1,
-      "test_size": 0.1
+      "val_size": 0.05,
+      "test_size": 0.05
     },
     "seed": 42,
     "text_perturbation": {
