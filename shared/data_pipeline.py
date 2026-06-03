@@ -257,6 +257,10 @@ def _load_sources_from_config(config: dict[str, Any]) -> DatasetDict:
     return DatasetDict(combined)
 
 
+def _source_is_neutral(source: dict[str, Any]) -> bool:
+    return bool(source.get("neutral", False))
+
+
 def _apply_label_transform(
     dataset: DatasetDict,
     dataset_cfg: dict[str, Any],
@@ -273,6 +277,7 @@ def _apply_label_transform(
     reserve_fraction = float(label_transform.get("reserve_fraction", 0.0))
     reserve_separator = str(label_transform.get("reserve_separator", " "))
     same_label_pack_size = int(label_transform.get("same_label_pack_size", 3))
+    neutral_label_value = _to_label_lookup_key(label_transform.get("neutral_label", "__neutral__"))
     target_labels = label_transform.get("target_labels")
     label_map = label_transform.get("label_map")
     label_names = label_transform.get("label_names")
@@ -308,8 +313,8 @@ def _apply_label_transform(
             raw_targets,
             target_label_to_index=target_label_to_index,
         )
-    source_label_rows: dict[str, list[dict[str, Any]]] = {}
-    source_label_order: list[str] = []
+        source_label_rows: dict[str, list[dict[str, Any]]] = {}
+        source_label_order: list[str] = []
     for split_name, split in dataset.items():
         for row in split:
             key = _to_label_lookup_key(row[source_column])
@@ -349,6 +354,10 @@ def _apply_label_transform(
         reserve_rows_by_label: dict[str, list[dict[str, Any]]] = {}
         free_rows_by_label: dict[str, list[dict[str, Any]]] = {}
         for label_key, rows in rows_by_label.items():
+            if label_key == neutral_label_value:
+                reserve_rows_by_label[label_key] = []
+                free_rows_by_label[label_key] = list(rows)
+                continue
             reserve_count = int(len(rows) * reserve_fraction) if reserve_fraction > 0.0 else 0
             reserve_rows = reserve_rng.sample(rows, k=reserve_count) if reserve_count > 0 else []
             reserve_rows_by_label[label_key] = reserve_rows
@@ -364,8 +373,10 @@ def _apply_label_transform(
         if reserve_fraction > 0.0:
             label_keys = list(source_label_order)
             for label_key in source_label_order:
+                if label_key == neutral_label_value:
+                    continue
                 reserve_rows = reserve_rows_by_label.get(label_key, [])
-                other_labels = [candidate for candidate in label_keys if candidate != label_key]
+                other_labels = [candidate for candidate in label_keys if candidate != label_key and candidate != neutral_label_value]
                 if not other_labels:
                     raise ValueError("reserve_fraction requires at least 2 distinct labels")
                 for reserve_row in reserve_rows:
