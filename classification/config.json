@@ -30,7 +30,7 @@
       "type": "single_to_multi_label",
       "source_column": "label",
       "output_column": "labels",
-      "reserve_fraction": 0.15,
+      "reserve_fraction": 0.05,
       "same_label_pack_size": 3,
       "label_names": {
         "0": "sadness",
@@ -68,11 +68,10 @@
         "name": "neutral",
         "neutral": true,
         "type": "hf_dataset",
-        "dataset_name": "some/neutral-dataset",
-        "config": "default",
+        "dataset_name": "cais/mmlu",
+        "config": "all",
         "split": "train",
-        "text_column": "text",
-        "label_column": "label"
+        "text_column": "question"
       }
     ]
   },

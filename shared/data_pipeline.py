@@ -170,11 +170,11 @@ def _apply_label_aliases(
     )
 
 
-def _apply_neutral_labels(dataset: DatasetDict, source_column: str) -> DatasetDict:
+def _apply_neutral_labels(dataset: DatasetDict, output_label_column: str) -> DatasetDict:
     def transform_split(split: Dataset) -> Dataset:
         def map_row(row: dict[str, Any]) -> dict[str, Any]:
             row = dict(row)
-            row[source_column] = "__neutral__"
+            row[output_label_column] = "__neutral__"
             return row
 
         return split.map(map_row)
@@ -230,16 +230,18 @@ def _load_sources_from_config(config: dict[str, Any]) -> DatasetDict:
     for source in sources:
         source_dataset = _load_single_source_dataset(source, dataset_cfg=dataset_cfg)
         source_text_column = source.get("text_column", dataset_cfg["text_columns"][0])
-        source_label_column = source.get("label_column", dataset_cfg["label_column"])
+        source_label_column = source.get("label_column")
         aliases = source.get("label_aliases") or source.get("label_names_map") or {}
         if source.get("neutral"):
-            source_dataset = _apply_neutral_labels(source_dataset, source_label_column)
+            source_dataset = _apply_neutral_labels(source_dataset, dataset_cfg["label_column"])
         else:
+            if source_label_column is None:
+                raise ValueError(f"Source {source.get('name', '<unnamed>')!r} must define label_column")
             source_dataset = _apply_label_aliases(source_dataset, aliases, label_column=source_label_column)
         for split_name, split in source_dataset.items():
             if source_text_column != dataset_cfg["text_columns"][0]:
                 split = split.rename_column(source_text_column, dataset_cfg["text_columns"][0])
-            if source_label_column != dataset_cfg["label_column"] and source_label_column in split.column_names:
+            if source_label_column and source_label_column != dataset_cfg["label_column"] and source_label_column in split.column_names:
                 split = split.rename_column(source_label_column, dataset_cfg["label_column"])
             loaded_splits.setdefault(split_name, []).append(split)
 
