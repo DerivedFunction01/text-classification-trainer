@@ -142,25 +142,32 @@ def _cast_multilabel_labels_to_float(dataset: DatasetDict) -> DatasetDict:
     return DatasetDict({split_name: cast_split(split) for split_name, split in dataset.items()})
 
 
-def _apply_label_aliases(dataset: DatasetDict, aliases: dict[str, Any]) -> DatasetDict:
+def _apply_label_aliases(
+    dataset: DatasetDict,
+    aliases: dict[str, Any],
+    *,
+    label_column: str,
+) -> DatasetDict:
     if not aliases:
         return dataset
 
     normalized_aliases = {_to_label_lookup_key(key): value for key, value in aliases.items()}
 
-    def transform_split(split: Dataset) -> Dataset:
+    def transform_split(split: Dataset, *, label_column: str) -> Dataset:
         def map_row(row: dict[str, Any]) -> dict[str, Any]:
             row = dict(row)
-            label_value = row.get("label")
+            label_value = row.get(label_column)
             alias_key = _to_label_lookup_key(label_value)
             if alias_key not in normalized_aliases:
                 raise KeyError(f"Missing label alias for value: {label_value!r}")
-            row["label"] = normalized_aliases[alias_key]
+            row[label_column] = normalized_aliases[alias_key]
             return row
 
         return split.map(map_row)
 
-    return DatasetDict({split_name: transform_split(split) for split_name, split in dataset.items()})
+    return DatasetDict(
+        {split_name: transform_split(split, label_column=label_column) for split_name, split in dataset.items()}
+    )
 
 
 def _apply_neutral_labels(dataset: DatasetDict, source_column: str) -> DatasetDict:
@@ -205,8 +212,6 @@ def _load_single_source_dataset(
     if source_type == "local_parquet":
         loaded = load_from_disk(str(_resolve_path(source["path"])))
         if isinstance(loaded, DatasetDict):
-            if source.get("neutral"):
-                return _apply_neutral_labels(loaded, dataset_cfg["label_column"])
             return loaded
         raise TypeError("Expected DatasetDict from local_parquet source")
 
@@ -224,12 +229,18 @@ def _load_sources_from_config(config: dict[str, Any]) -> DatasetDict:
     loaded_splits: dict[str, list[Dataset]] = {}
     for source in sources:
         source_dataset = _load_single_source_dataset(source, dataset_cfg=dataset_cfg)
+        source_text_column = source.get("text_column", dataset_cfg["text_columns"][0])
+        source_label_column = source.get("label_column", dataset_cfg["label_column"])
         aliases = source.get("label_aliases") or source.get("label_names_map") or {}
         if source.get("neutral"):
-            source_dataset = _apply_neutral_labels(source_dataset, dataset_cfg["label_column"])
+            source_dataset = _apply_neutral_labels(source_dataset, source_label_column)
         else:
-            source_dataset = _apply_label_aliases(source_dataset, aliases)
+            source_dataset = _apply_label_aliases(source_dataset, aliases, label_column=source_label_column)
         for split_name, split in source_dataset.items():
+            if source_text_column != dataset_cfg["text_columns"][0]:
+                split = split.rename_column(source_text_column, dataset_cfg["text_columns"][0])
+            if source_label_column != dataset_cfg["label_column"] and source_label_column in split.column_names:
+                split = split.rename_column(source_label_column, dataset_cfg["label_column"])
             loaded_splits.setdefault(split_name, []).append(split)
 
     combined = {

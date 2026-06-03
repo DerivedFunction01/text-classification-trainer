@@ -41,12 +41,6 @@
         "5": "surprise"
       }
     },
-    "source": {
-      "type": "hf_dataset",
-      "dataset_name": "dair-ai/emotion",
-      "config": "unsplit",
-      "split": "train"
-    },
     "sources": [
       {
         "name": "canonical",
@@ -54,7 +48,9 @@
         "type": "hf_dataset",
         "dataset_name": "dair-ai/emotion",
         "config": "unsplit",
-        "split": "train"
+        "split": "train",
+        "text_column": "text",
+        "label_column": "label"
       },
       {
         "name": "augmentation",
@@ -62,6 +58,8 @@
         "dataset_name": "some/augmentation-dataset",
         "config": "default",
         "split": "train",
+        "text_column": "text",
+        "label_column": "label",
         "label_aliases": {
           "sad": "sadness"
         }
@@ -72,7 +70,9 @@
         "type": "hf_dataset",
         "dataset_name": "some/neutral-dataset",
         "config": "default",
-        "split": "train"
+        "split": "train",
+        "text_column": "text",
+        "label_column": "label"
       }
     ]
   },
