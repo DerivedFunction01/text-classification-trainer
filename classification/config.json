@@ -6,7 +6,9 @@
   },
   "dataset": {
     "label_column": "label",
-    "text_columns": ["text"],
+    "text_columns": [
+      "text"
+    ],
     "cache_dir": ".cache/emotions/tokenized",
     "split_strategy": {
       "type": "random",

@@ -245,6 +245,11 @@ def _load_sources_from_config(config: dict[str, Any]) -> DatasetDict:
                 split = split.rename_column(source_text_column, dataset_cfg["text_columns"][0])
             if source_label_column and source_label_column != dataset_cfg["label_column"] and source_label_column in split.column_names:
                 split = split.rename_column(source_label_column, dataset_cfg["label_column"])
+            if dataset_cfg["label_column"] in split.column_names:
+                split = split.map(
+                    lambda row: {dataset_cfg["label_column"]: str(row[dataset_cfg["label_column"]])},
+                    desc=f"Normalizing labels for {source.get('name', '<unnamed>')}/{split_name}",
+                )
             keep_columns = [column for column in (dataset_cfg["text_columns"][0], dataset_cfg["label_column"]) if column in split.column_names]
             drop_columns = [column for column in split.column_names if column not in keep_columns]
             if drop_columns:
