@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from datasets import Dataset, DatasetDict, load_from_disk
+from datasets import concatenate_datasets
 from transformers import AutoTokenizer
 from tqdm.auto import tqdm
 
@@ -137,6 +138,86 @@ def _cast_multilabel_labels_to_float(dataset: DatasetDict) -> DatasetDict:
         )
 
     return DatasetDict({split_name: cast_split(split) for split_name, split in dataset.items()})
+
+
+def _apply_label_aliases(dataset: DatasetDict, aliases: dict[str, Any]) -> DatasetDict:
+    if not aliases:
+        return dataset
+
+    normalized_aliases = {_to_label_lookup_key(key): value for key, value in aliases.items()}
+
+    def transform_split(split: Dataset) -> Dataset:
+        def map_row(row: dict[str, Any]) -> dict[str, Any]:
+            row = dict(row)
+            label_value = row.get("label")
+            alias_key = _to_label_lookup_key(label_value)
+            if alias_key not in normalized_aliases:
+                raise KeyError(f"Missing label alias for value: {label_value!r}")
+            row["label"] = normalized_aliases[alias_key]
+            return row
+
+        return split.map(map_row)
+
+    return DatasetDict({split_name: transform_split(split) for split_name, split in dataset.items()})
+
+
+def _load_single_source_dataset(
+    source: dict[str, Any],
+    *,
+    dataset_cfg: dict[str, Any],
+) -> DatasetDict:
+    source_type = source["type"]
+
+    if source_type == "hf_dataset_dict":
+        dataset = load_hf_dataset_dict(source["dataset_name"], config=source.get("config"))
+        if isinstance(dataset, DatasetDict):
+            return dataset
+        raise TypeError("Expected DatasetDict from hf_dataset_dict source")
+
+    if source_type == "hf_dataset":
+        split = source["split"]
+        dataset = load_hf_dataset(source["dataset_name"], split=split, config=source.get("config"))
+        if not isinstance(dataset, Dataset):
+            raise TypeError("Expected Dataset from hf_dataset source")
+        rows = dataset.to_list()
+        return rows_to_dataset_dict(
+            rows,
+            val_size=dataset_cfg["split_strategy"].get("val_size"),
+            test_size=dataset_cfg["split_strategy"].get("test_size"),
+            seed=dataset_cfg.get("seed", 42),
+            columns=dataset.column_names,
+        )
+
+    if source_type == "local_parquet":
+        loaded = load_from_disk(str(_resolve_path(source["path"])))
+        if isinstance(loaded, DatasetDict):
+            return loaded
+        raise TypeError("Expected DatasetDict from local_parquet source")
+
+    raise ValueError(f"Unknown dataset source type: {source_type!r}")
+
+
+def _load_sources_from_config(config: dict[str, Any]) -> DatasetDict:
+    dataset_cfg = config["dataset"]
+    sources = dataset_cfg.get("sources")
+    if sources is None:
+        return _load_single_source_dataset(dataset_cfg["source"], dataset_cfg=dataset_cfg)
+    if not isinstance(sources, list) or not sources:
+        raise ValueError("dataset.sources must be a non-empty list when provided")
+
+    loaded_splits: dict[str, list[Dataset]] = {}
+    for source in sources:
+        source_dataset = _load_single_source_dataset(source, dataset_cfg=dataset_cfg)
+        aliases = source.get("label_aliases") or source.get("label_names_map") or {}
+        source_dataset = _apply_label_aliases(source_dataset, aliases)
+        for split_name, split in source_dataset.items():
+            loaded_splits.setdefault(split_name, []).append(split)
+
+    combined = {
+        split_name: concatenate_datasets(splits)
+        for split_name, splits in loaded_splits.items()
+    }
+    return DatasetDict(combined)
 
 
 def _apply_label_transform(
@@ -383,37 +464,7 @@ def _apply_text_perturbation(dataset: DatasetDict, dataset_cfg: dict[str, Any]) 
     return DatasetDict({split_name: transform_split(split_name, split) for split_name, split in dataset.items()})
 
 def load_dataset_from_config(config: dict[str, Any]) -> DatasetDict:
-    source = config["dataset"]["source"]
-    source_type = source["type"]
-    dataset_cfg = config["dataset"]
-
-    if source_type == "hf_dataset_dict":
-        dataset = load_hf_dataset_dict(source["dataset_name"], config=source.get("config"))
-        if isinstance(dataset, DatasetDict):
-            return dataset
-        raise TypeError("Expected DatasetDict from hf_dataset_dict source")
-
-    if source_type == "hf_dataset":
-        split = source["split"]
-        dataset = load_hf_dataset(source["dataset_name"], split=split, config=source.get("config"))
-        if not isinstance(dataset, Dataset):
-            raise TypeError("Expected Dataset from hf_dataset source")
-        rows = dataset.to_list()
-        return rows_to_dataset_dict(
-            rows,
-            val_size=dataset_cfg["split_strategy"].get("val_size"),
-            test_size=dataset_cfg["split_strategy"].get("test_size"),
-            seed=dataset_cfg.get("seed", 42),
-            columns=dataset.column_names,
-        )
-
-    if source_type == "local_parquet":
-        loaded = load_from_disk(str(_resolve_path(source["path"])))
-        if isinstance(loaded, DatasetDict):
-            return loaded
-        raise TypeError("Expected DatasetDict from local_parquet source")
-
-    raise ValueError(f"Unknown dataset source type: {source_type!r}")
+    return _load_sources_from_config(config)
 
 
 def build_and_cache_dataset(config: dict[str, Any]) -> DatasetDict:
