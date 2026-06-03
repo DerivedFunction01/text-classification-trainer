@@ -10,12 +10,27 @@ from shared.paths import ARTIFACT_ROOT, CACHE_ROOT
 from tqdm.auto import tqdm
 
 
-def build_all_sources() -> None:
-    steps = [
-    ]
-    for label, action in tqdm(steps, desc="Fetch/build stages", unit="stage"):
-        print(label + " ...")
-        action()
+def discover_cache_subdirs() -> list[str]:
+    if not CACHE_ROOT.exists():
+        return []
+
+    subdirs = []
+    for tokenized_dir in CACHE_ROOT.glob("*/tokenized"):
+        if any(tokenized_dir.glob("*.parquet")):
+            subdirs.append(tokenized_dir.parent.name)
+    return sorted(set(subdirs))
+
+
+def build_all_sources() -> list[Path]:
+    subdirs = discover_cache_subdirs()
+    if not subdirs:
+        print("No tokenized caches found under .cache to archive.")
+        return []
+
+    results: list[Path] = []
+    for subdir_name in tqdm(subdirs, desc="Archiving caches", unit="cache"):
+        results.append(zip_cache_subdir(subdir_name))
+    return results
 
 
 def build_cache_subdir(subdir_name: str) -> None:
@@ -94,7 +109,8 @@ def main() -> None:
     args = parse_args()
     if args.build:
         build_all_sources()
-    for subdir_name in tqdm(args.subdirs, desc="Archiving caches", unit="cache"):
+    subdirs = args.subdirs if args.subdirs is not None else discover_cache_subdirs()
+    for subdir_name in tqdm(subdirs, desc="Archiving caches", unit="cache"):
         reconcile_cache_subdir(subdir_name)
 
 
