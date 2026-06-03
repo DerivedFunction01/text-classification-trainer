@@ -25,7 +25,7 @@
       "type": "single_to_multi_label",
       "source_column": "label",
       "output_column": "labels",
-      "reserve_fraction": 0.50,
+      "reserve_fraction": 0.25,
       "label_names": {
         "0": "sadness",
         "1": "joy",
@@ -55,9 +55,9 @@
     "padding": "max_length"
   },
   "training": {
-    "num_train_epochs": 2,
+    "num_train_epochs": 1,
     "learning_rate": 2e-5,
-    "per_device_train_batch_size": 8,
+    "per_device_train_batch_size": 12,
     "per_device_eval_batch_size": 4,
     "gradient_accumulation_steps": 4,
     "evals_per_epoch": 2,
@@ -69,6 +69,6 @@
     "seed": 42,
     "threshold": 0.5,
     "metric_prefix": "",
-    "push_to_hub": false
+    "push_to_hub": true
   }
 }
