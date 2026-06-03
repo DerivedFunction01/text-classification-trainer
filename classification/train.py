@@ -127,7 +127,7 @@ def make_training_args(
         greater_is_better=True,
         seed=training["seed"],
         report_to="tensorboard",
-        push_to_hub=True,
+        push_to_hub=training["push_to_hub"],
     )
 
 
@@ -338,7 +338,8 @@ def main() -> None:
     trainer.save_model(str(output_dir))
     tokenizer.save_pretrained(str(output_dir))
     print(f"\nModel saved to: {output_dir}")
-    trainer.push_to_hub()
+    if 
+        trainer.push_to_hub()
 
 
 if __name__ == "__main__":

@@ -68,6 +68,7 @@
     "dataloader_num_workers": 4,
     "seed": 42,
     "threshold": 0.5,
-    "metric_prefix": ""
+    "metric_prefix": "",
+    "push_to_hub": false
   }
 }
