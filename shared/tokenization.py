@@ -25,6 +25,7 @@ def tokenize_text_split(
             padding=padding,
         ),
         batched=True,
+        remove_columns=split.column_names,
     )
 
 
@@ -66,6 +67,7 @@ def tokenize_pair_split(
             padding=padding,
         ),
         batched=True,
+        remove_columns=split.column_names,
     )
 
 
