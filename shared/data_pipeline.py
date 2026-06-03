@@ -5,7 +5,7 @@ import hashlib
 from pathlib import Path
 from typing import Any
 
-from datasets import Dataset, DatasetDict, load_from_disk
+from datasets import Dataset, DatasetDict, Value, load_from_disk
 from datasets import concatenate_datasets
 from transformers import AutoTokenizer
 from tqdm.auto import tqdm
@@ -250,6 +250,7 @@ def _load_sources_from_config(config: dict[str, Any]) -> DatasetDict:
                     lambda row: {dataset_cfg["label_column"]: str(row[dataset_cfg["label_column"]])},
                     desc=f"Normalizing labels for {source.get('name', '<unnamed>')}/{split_name}",
                 )
+                split = split.cast_column(dataset_cfg["label_column"], Value("string"))
             keep_columns = [column for column in (dataset_cfg["text_columns"][0], dataset_cfg["label_column"]) if column in split.column_names]
             drop_columns = [column for column in split.column_names if column not in keep_columns]
             if drop_columns:
