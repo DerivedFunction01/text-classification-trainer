@@ -697,9 +697,16 @@ def build_and_cache_dataset(config: dict[str, Any]) -> DatasetDict:
     raw_dataset = load_dataset_from_config(config)
     raw_dataset, label_metadata = _apply_label_transform(raw_dataset, dataset_cfg)
     if config["task_type"] == "multi_label_classification":
-        raw_dataset, score_dict_metadata = _normalize_score_dict_labels(raw_dataset, label_column=dataset_cfg["label_column"])
+        raw_dataset, score_dict_metadata = _normalize_score_dict_labels(
+            raw_dataset,
+            label_column=dataset_cfg["label_column"],
+        )
         if score_dict_metadata is not None:
             label_metadata = score_dict_metadata if label_metadata is None else {**label_metadata, **score_dict_metadata}
+
+    if dataset_cfg["label_column"] != "labels" and "labels" not in raw_dataset["train"].column_names:
+        raw_dataset = raw_dataset.rename_column(dataset_cfg["label_column"], "labels")
+
     raw_dataset = _apply_text_perturbation(raw_dataset, dataset_cfg)
     tokenizer = AutoTokenizer.from_pretrained(config["model"]["name"])
     tokenized = tokenize_dataset_dict(
@@ -710,8 +717,6 @@ def build_and_cache_dataset(config: dict[str, Any]) -> DatasetDict:
         max_length=config["tokenization"]["max_length"],
         padding=config["tokenization"].get("padding", "max_length"),
     )
-    if label_column != "labels" and "labels" not in tokenized["train"].column_names:
-        tokenized = tokenized.rename_column(label_column, "labels")
     if config["task_type"] == "multi_label_classification":
         tokenized = _cast_multilabel_labels_to_float(tokenized, label_column="labels")
     expected_meta["label_metadata"] = label_metadata
