@@ -178,15 +178,17 @@ def _compute_multi_label_metrics(
     predictions: np.ndarray,
     *,
     metric_prefix: str,
+    threshold: float = 0.5,
 ) -> dict[str, float]:
+    binary_labels = (labels >= threshold).astype(int)
     return {
-        f"{metric_prefix}_f1_micro": f1_score(labels, predictions, average="micro", zero_division=0),
-        f"{metric_prefix}_f1_macro": f1_score(labels, predictions, average="macro", zero_division=0),
+        f"{metric_prefix}_f1_micro": f1_score(binary_labels, predictions, average="micro", zero_division=0),
+        f"{metric_prefix}_f1_macro": f1_score(binary_labels, predictions, average="macro", zero_division=0),
         f"{metric_prefix}_precision_micro": precision_score(
-            labels, predictions, average="micro", zero_division=0
+            binary_labels, predictions, average="micro", zero_division=0
         ),
         f"{metric_prefix}_recall_micro": recall_score(
-            labels, predictions, average="micro", zero_division=0
+            binary_labels, predictions, average="micro", zero_division=0
         ),
     }
 
@@ -309,11 +311,18 @@ def main() -> None:
         labels = np.asarray(labels)
 
         probabilities = get_probability_transform(task_type)(logits)
-        predictions = (probabilities >= training_cfg["threshold"]).astype(int)
-        metric_prefix = training_cfg["metric_prefix"]
+        threshold = float(training_cfg["threshold"])
+        predictions = (probabilities >= threshold).astype(int)
         if task_type == "classification":
-            return _compute_single_label_metrics(labels, predictions, metric_prefix=metric_prefix)
-        return _compute_multi_label_metrics(labels, predictions, metric_prefix=metric_prefix)
+            labels = (labels >= threshold).astype(int)
+            return _compute_single_label_metrics(labels, predictions, metric_prefix=training_cfg["metric_prefix"])
+
+        labels = (labels >= threshold).astype(int)
+        return _compute_multi_label_metrics(
+            labels,
+            predictions,
+            metric_prefix=training_cfg["metric_prefix"],
+        )
 
     trainer = Trainer(
         model=model,
