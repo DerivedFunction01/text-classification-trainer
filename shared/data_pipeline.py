@@ -138,10 +138,10 @@ def _remove_items_by_identity(rows: list[dict[str, Any]], items_to_remove: list[
     return remaining
 
 
-def _cast_multilabel_labels_to_float(dataset: DatasetDict) -> DatasetDict:
+def _cast_multilabel_labels_to_float(dataset: DatasetDict, *, label_column: str = "labels") -> DatasetDict:
     def cast_split(split: Dataset) -> Dataset:
         return split.map(
-            lambda row: {"labels": [float(value) for value in row["labels"]]},
+            lambda row: {label_column: [float(value) for value in row[label_column]]},
             desc="Casting multi-label targets to float",
         )
 
@@ -665,10 +665,10 @@ def build_and_cache_dataset(config: dict[str, Any]) -> DatasetDict:
         max_length=config["tokenization"]["max_length"],
         padding=config["tokenization"].get("padding", "max_length"),
     )
-    if config["task_type"] == "multi_label_classification":
-        tokenized = _cast_multilabel_labels_to_float(tokenized)
     if label_column != "labels" and "labels" not in tokenized["train"].column_names:
         tokenized = tokenized.rename_column(label_column, "labels")
+    if config["task_type"] == "multi_label_classification":
+        tokenized = _cast_multilabel_labels_to_float(tokenized, label_column="labels")
     expected_meta["label_metadata"] = label_metadata
     save_tokenized_dataset_cache(
         tokenized,
