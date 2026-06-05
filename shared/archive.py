@@ -12,7 +12,7 @@ from typing import Iterable
 from tqdm.auto import tqdm
 
 from shared.paths import ARTIFACT_ROOT, CACHE_ROOT
-ARCHIVE_NAME_TEMPLATE = "distilbert_{subdir_name}_cache.zip"
+ARCHIVE_NAME_TEMPLATE = "{subdir_name}_cache.zip"
 
 
 def archive_path_for(subdir_name: str, artifact_root: Path = ARTIFACT_ROOT) -> Path:
@@ -100,7 +100,7 @@ def zip_cache_subdir(
         json.load(f)
 
     artifact_root.mkdir(parents=True, exist_ok=True)
-    archive_base = artifact_root / f"distilbert_{subdir_name}_cache"
+    archive_base = artifact_root / f"{subdir_name}_cache"
     archive_path = Path(
         shutil.make_archive(
             str(archive_base),

@@ -35,7 +35,7 @@ def build_all_sources() -> list[Path]:
     results: list[Path] = []
     for subdir_name in tqdm(subdirs, desc="Archiving caches", unit="cache"):
         build_cache_subdir(subdir_name)
-        results.append(ARTIFACT_ROOT / f"distilbert_{subdir_name}_cache.zip")
+        results.append(ARTIFACT_ROOT / f"{subdir_name}_cache.zip")
     return results
 
 
@@ -77,7 +77,7 @@ def reconcile_cache_subdir(subdir_name: str) -> Path:
 
     if has_cache and has_archive:
         print(f"{subdir_name}: cache and archive already exist, skipping")
-        return ARTIFACT_ROOT / f"distilbert_{subdir_name}_cache.zip"
+        return ARTIFACT_ROOT / f"{subdir_name}_cache.zip"
 
     if has_cache and not has_archive:
         return zip_cache_subdir(subdir_name)
@@ -85,11 +85,11 @@ def reconcile_cache_subdir(subdir_name: str) -> Path:
     if has_archive and not has_cache:
         print(f"{subdir_name}: tokenized cache missing, restoring from archive")
         ensure_cache_archive_extracted(subdir_name)
-        return ARTIFACT_ROOT / f"distilbert_{subdir_name}_cache.zip"
+        return ARTIFACT_ROOT / f"{subdir_name}_cache.zip"
 
     print(f"{subdir_name}: cache and archive both missing, rebuilding cache locally")
     build_cache_subdir(subdir_name)
-    return ARTIFACT_ROOT / f"distilbert_{subdir_name}_cache.zip"
+    return ARTIFACT_ROOT / f"{subdir_name}_cache.zip"
 
 
 def parse_args() -> argparse.Namespace:
