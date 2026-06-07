@@ -96,6 +96,7 @@
     "logging_steps": 100,
     "weight_decay": 0.01,
     "fp16": true,
+    "bf16": false,
     "dataloader_num_workers": 4,
     "seed": 42,
     "threshold": 0.5,
