@@ -340,7 +340,7 @@ def main() -> None:
         compute_metrics=compute_metrics,
     )
 
-    trainer.train()
+    trainer.train(resume_from_checkpoint=training_cfg["resume_from_checkpoint"])
     print("\nEvaluating on test split ...")
     print(trainer.evaluate(ds["test"]))  # type: ignore
     tokenizer = AutoTokenizer.from_pretrained(model_cfg["name"], token=hf_token)
